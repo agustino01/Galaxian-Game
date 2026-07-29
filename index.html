@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Galaxian</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  :root{
+    --bg: #05050f;
+    --panel: #0a0a1a;
+    --border: #241f4a;
+    --ink: #e8e6ff;
+    --dim: #6a63a8;
+    --accent: #ff3d81;
+    --ship: #4cf2ff;
+    --bullet: #ffe066;
+    --row1: #ff3d81;
+    --row2: #b45cff;
+    --row3: #4cf2ff;
+    --row4: #6fe86f;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0; padding:0; height:100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Courier New', Courier, monospace;
+    overflow:hidden;
+    touch-action:none;
+    user-select:none;
+  }
+  body{
+    display:flex; flex-direction:column; align-items:center;
+    min-height:100vh;
+    padding: env(safe-area-inset-top,10px) 10px env(safe-area-inset-bottom,10px);
+    background: radial-gradient(ellipse at top, #10102a 0%, #05050f 60%);
+  }
+  .eyebrow{
+    letter-spacing: 0.35em;
+    font-size: 10px;
+    color: var(--dim);
+    margin-top: 8px;
+    text-transform: uppercase;
+  }
+  h1{
+    font-size: 28px;
+    margin: 4px 0 8px;
+    letter-spacing: 4px;
+    color: var(--accent);
+    text-shadow: 0 0 16px rgba(255,61,129,0.45);
+  }
+  .hud{
+    display:flex; justify-content:space-between; width:100%;
+    max-width: 380px;
+    font-size: 13px;
+    padding: 0 4px 8px;
+    color: var(--dim);
+  }
+  .hud b{ color: var(--ink); }
+  #wrap{
+    position:relative;
+    width:100%;
+    max-width: 380px;
+    aspect-ratio: 3 / 4;
+    background: var(--panel);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    box-shadow: inset 0 0 40px rgba(0,0,0,0.7), 0 0 24px rgba(255,61,129,0.06);
+    overflow:hidden;
+  }
+  canvas{ display:block; width:100%; height:100%; }
+  #overlay{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background: rgba(5,5,15,0.9);
+    text-align:center;
+    padding: 20px;
+    gap: 14px;
+    z-index: 5;
+  }
+  #overlay h2{ margin:0; font-size:20px; color:var(--ship); letter-spacing:1px; }
+  #overlay p{ margin:0; font-size:12px; color:var(--dim); line-height:1.6; max-width:260px; }
+  button.play{
+    background: var(--accent);
+    color: #05050f;
+    border:none;
+    font-family:inherit;
+    font-weight:bold;
+    font-size:15px;
+    letter-spacing:1px;
+    padding: 12px 28px;
+    border-radius: 8px;
+    cursor:pointer;
+  }
+  button.play:active{ transform: scale(0.97); }
+  #controls{
+    margin-top: 14px;
+    display:grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap:8px;
+    width:100%;
+    max-width:380px;
+  }
+  #controls button{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--ship);
+    font-size: 20px;
+    border-radius: 10px;
+    padding: 16px 0;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #controls button:active{ background:#161436; }
+  #fireBtn{ color: var(--bullet); font-size:14px; letter-spacing:1px; }
+  .credit{ margin-top:10px; font-size:11px; letter-spacing:1px; color:var(--dim); }
+</style>
+</head>
+<body>
+  <div class="eyebrow">ataque estelar</div>
+  <h1>GALAXIAN</h1>
+  <div class="hud">
+    <span>PUNTOS <b id="score">0</b></span>
+    <span>NIVEL <b id="level">1</b></span>
+    <span>VIDAS <b id="lives">3</b></span>
+  </div>
+  <div id="wrap">
+    <canvas id="game"></canvas>
+    <div id="overlay">
+      <h2>Toca para empezar</h2>
+      <p>Movete con ◀ ▶ y disparás con ★. Cuidado: algunas naves se lanzan en picada.</p>
+      <button class="play" id="playBtn">Jugar</button>
+    </div>
+  </div>
+  <div id="controls">
+    <button data-act="left">◀</button>
+    <button id="fireBtn" data-act="fire">★ FUEGO</button>
+    <button data-act="right">▶</button>
+  </div>
+  <div class="credit">Creado por Agustino López</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const playBtn = document.getElementById('playBtn');
+  const scoreEl = document.getElementById('score');
+  const levelEl = document.getElementById('level');
+  const livesEl = document.getElementById('lives');
+  const wrap = document.getElementById('wrap');
+
+  let W, H, running;
+  let player, bullets, enemyBullets, enemies, stars, score, lives, level, fireCooldown, spawnDiveTimer;
+
+  const ROWS = 4, COLS = 8;
+  const ROW_COLORS = ['#ff3d81','#b45cff','#4cf2ff','#6fe86f'];
+
+  function resize(){
+    W = wrap.clientWidth; H = wrap.clientHeight;
+    canvas.width = W * devicePixelRatio;
+    canvas.height = H * devicePixelRatio;
+    ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+    draw();
+  }
+  window.addEventListener('resize', resize);
+
+  function makeStars(){
+    stars = [];
+    for(let i=0;i<50;i++){
+      stars.push({x:Math.random()*W, y:Math.random()*H, r:Math.random()*1.6+0.4, s:Math.random()*0.4+0.15});
+    }
+  }
+
+  function formationOrigin(){
+    return { x: W*0.12, y: H*0.10, dx: 0 };
+  }
+
+  function makeEnemies(){
+    enemies = [];
+    const marginX = W*0.10, marginY = H*0.08;
+    const gapX = (W - marginX*2) / (COLS-1);
+    const gapY = H*0.075;
+    for(let r=0;r<ROWS;r++){
+      for(let c=0;c<COLS;c++){
+        enemies.push({
+          row: r, col: c,
+          baseX: marginX + c*gapX,
+          baseY: marginY + r*gapY,
+          x: marginX + c*gapX,
+          y: marginY + r*gapY,
+          alive: true,
+          diving: false,
+          diveT: 0,
+          diveStartX:0, diveStartY:0
+        });
+      }
+    }
+  }
+
+  let formTime = 0;
+
+  function resetGame(){
+    player = { x: W/2, y: H-30, w: 22, h: 16, speed: W*0.9 };
+    bullets = [];
+    enemyBullets = [];
+    score = 0; lives = 3; level = 1;
+    fireCooldown = 0;
+    spawnDiveTimer = 2.2;
+    formTime = 0;
+    makeStars();
+    makeEnemies();
+    updateHUD();
+  }
+
+  function updateHUD(){
+    scoreEl.textContent = score;
+    levelEl.textContent = level;
+    livesEl.textContent = lives;
+  }
+
+  let moveDir = 0; // -1,0,1
+  let firing = false;
+
+  document.querySelectorAll('#controls button').forEach(btn=>{
+    const act = btn.dataset.act;
+    if(act==='fire'){
+      btn.addEventListener('touchstart', e=>{ e.preventDefault(); firing = true; });
+      btn.addEventListener('touchend', e=>{ e.preventDefault(); firing = false; });
+      btn.addEventListener('mousedown', ()=> firing = true);
+      btn.addEventListener('mouseup', ()=> firing = false);
+    } else {
+      const dir = act==='left' ? -1 : 1;
+      const startFn = e=>{ e.preventDefault(); moveDir = dir; };
+      const endFn = e=>{ e.preventDefault(); if(moveDir===dir) moveDir = 0; };
+      btn.addEventListener('touchstart', startFn);
+      btn.addEventListener('touchend', endFn);
+      btn.addEventListener('mousedown', ()=> moveDir = dir);
+      btn.addEventListener('mouseup', ()=> { if(moveDir===dir) moveDir = 0; });
+    }
+  });
+
+  window.addEventListener('keydown', e=>{
+    if(e.key==='ArrowLeft') moveDir = -1;
+    else if(e.key==='ArrowRight') moveDir = 1;
+    else if(e.key===' ') firing = true;
+  });
+  window.addEventListener('keyup', e=>{
+    if(e.key==='ArrowLeft' && moveDir===-1) moveDir = 0;
+    else if(e.key==='ArrowRight' && moveDir===1) moveDir = 0;
+    else if(e.key===' ') firing = false;
+  });
+
+  // drag to move on canvas
+  let dragging = false;
+  wrap.addEventListener('touchstart', e=>{
+    dragging = true;
+    firing = true;
+  }, {passive:true});
+  wrap.addEventListener('touchmove', e=>{
+    if(!dragging) return;
+    const rect = wrap.getBoundingClientRect();
+    const tx = e.touches[0].clientX - rect.left;
+    player.x = Math.max(player.w, Math.min(W-player.w, tx));
+  }, {passive:true});
+  wrap.addEventListener('touchend', ()=>{ dragging=false; firing=false; });
+
+  function fire(){
+    bullets.push({x: player.x, y: player.y-10, r: 3});
+  }
+
+  function startDive(){
+    const alive = enemies.filter(e=>e.alive && !e.diving);
+    if(!alive.length) return;
+    const e = alive[Math.floor(Math.random()*alive.length)];
+    e.diving = true;
+    e.diveT = 0;
+    e.diveStartX = e.x;
+    e.diveStartY = e.y;
+    e.diveSeed = Math.random()*10;
+  }
+
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min(0.033, (now-last)/1000);
+    last = now;
+    if(running) update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt){
+    formTime += dt;
+    // player move
+    player.x += moveDir * player.speed * dt;
+    player.x = Math.max(player.w, Math.min(W-player.w, player.x));
+
+    // firing
+    fireCooldown -= dt;
+    if(firing && fireCooldown<=0){
+      fire();
+      fireCooldown = 0.28;
+    }
+
+    // bullets
+    bullets.forEach(b=> b.y -= 320*dt);
+    bullets = bullets.filter(b=> b.y > -10);
+    enemyBullets.forEach(b=> b.y += 200*dt);
+    enemyBullets = enemyBullets.filter(b=> b.y < H+10);
+
+    // formation sway
+    const sway = Math.sin(formTime*0.9) * (W*0.16);
+
+    enemies.forEach(e=>{
+      if(!e.alive) return;
+      if(!e.diving){
+        e.x = e.baseX + sway;
+        e.y = e.baseY + Math.sin(formTime*1.4 + e.col)*3;
+      } else {
+        e.diveT += dt;
+        const t = e.diveT;
+        const targetX = player.x;
+        e.x = e.diveStartX + Math.sin(t*2 + e.diveSeed)*40 + (targetX - e.diveStartX)*Math.min(1,t*0.5);
+        e.y = e.diveStartY + t*140;
+        if(Math.random() < dt*1.2){
+          enemyBullets.push({x:e.x, y:e.y+6});
+        }
+        if(e.y > H+20){
+          e.diving = false;
+          e.x = e.baseX + sway;
+          e.y = e.baseY;
+        }
+      }
+    });
+
+    // random dive trigger
+    spawnDiveTimer -= dt;
+    if(spawnDiveTimer<=0){
+      startDive();
+      spawnDiveTimer = Math.max(0.9, 2.6 - level*0.15);
+    }
+
+    // collisions: player bullets vs enemies
+    for(const b of bullets){
+      for(const e of enemies){
+        if(!e.alive) continue;
+        const dx = b.x-e.x, dy = b.y-e.y;
+        if(dx*dx+dy*dy < 130){
+          e.alive = false;
+          b.hit = true;
+          score += e.diving ? 150 : 50;
+        }
+      }
+    }
+    bullets = bullets.filter(b=>!b.hit);
+
+    // collisions: enemy bullets / diving enemies vs player
+    for(const b of enemyBullets){
+      const dx=b.x-player.x, dy=b.y-player.y;
+      if(dx*dx+dy*dy < 140){ b.hit = true; loseLife(); }
+    }
+    enemyBullets = enemyBullets.filter(b=>!b.hit);
+
+    enemies.forEach(e=>{
+      if(!e.alive || !e.diving) return;
+      const dx=e.x-player.x, dy=e.y-player.y;
+      if(dx*dx+dy*dy < 180){
+        e.alive = false;
+        loseLife();
+      }
+    });
+
+    updateHUD();
+
+    if(enemies.every(e=>!e.alive)){
+      level++;
+      makeEnemies();
+      spawnDiveTimer = Math.max(0.8, 2.4 - level*0.15);
+      updateHUD();
+    }
+  }
+
+  function loseLife(){
+    lives--;
+    updateHUD();
+    if(lives<=0) return gameOver();
+  }
+
+  function gameOver(){
+    running = false;
+    overlay.querySelector('h2').textContent = 'Juego terminado';
+    overlay.querySelector('p').textContent = `Puntos: ${score} · Llegaste al nivel ${level}. Tocá para reintentar.`;
+    playBtn.textContent = 'Reintentar';
+    overlay.style.display = 'flex';
+  }
+
+  function start(){
+    resetGame();
+    running = true;
+    overlay.style.display = 'none';
+  }
+  playBtn.addEventListener('click', start);
+
+  function drawShip(x,y,color){
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, y-9);
+    ctx.lineTo(x-9, y+7);
+    ctx.lineTo(x-4, y+4);
+    ctx.lineTo(x, y+8);
+    ctx.lineTo(x+4, y+4);
+    ctx.lineTo(x+9, y+7);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawEnemy(x,y,color){
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x-8,y);
+    ctx.lineTo(x-3,y-6);
+    ctx.lineTo(x+3,y-6);
+    ctx.lineTo(x+8,y);
+    ctx.lineTo(x+3,y+6);
+    ctx.lineTo(x-3,y+6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.arc(x,y,2,0,7);
+    ctx.fill();
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // stars
+    if(stars){
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      stars.forEach(s=>{
+        s.y += s.s;
+        if(s.y>H) s.y=0;
+        ctx.globalAlpha = 0.4 + s.r*0.3;
+        ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,7); ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+    }
+    if(!enemies) return;
+    enemies.forEach(e=>{
+      if(e.alive) drawEnemy(e.x, e.y, ROW_COLORS[e.row % ROW_COLORS.length]);
+    });
+    ctx.fillStyle = '#ffe066';
+    bullets.forEach(b=>{
+      ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,7); ctx.fill();
+    });
+    ctx.fillStyle = '#ff3d81';
+    enemyBullets.forEach(b=>{
+      ctx.beginPath(); ctx.arc(b.x,b.y,2.6,0,7); ctx.fill();
+    });
+    if(player) drawShip(player.x, player.y, '#4cf2ff');
+  }
+
+  resize();
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
